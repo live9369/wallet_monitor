@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/block_tx_filter.test.js"
+    "test": "node tests/block_tx_filter.test.js",
+    "start": "node src/start.js"
   },
   "keywords": [],
   "author": "",

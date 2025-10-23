@@ -4,6 +4,7 @@ const TgBot = require('./notify/bot');
 const BlockScanner = require('./process/scan');
 const MessageTemplates = require('./notify/text');
 const { getIsCexDict } = require('./utils');
+const Logger = require('./utils/logger');
 require('dotenv').config();
 
 /**
@@ -45,7 +46,10 @@ class WalletMonitor {
         // 初始化组件
         this.redis = new RefRedis({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' }, this.config.redisPrefix);
         this.bot = new TgBot();
-        this.scanner = new BlockScanner(process.env.RPC_URL || 'https://dragon.maiko.icu/bsc2h');
+
+        // 初始化日志器
+        this.logger = new Logger(options.instanceName);
+        this.scanner = new BlockScanner(process.env.RPC_URL || 'https://dragon.maiko.icu/bsc2h', this.logger);
         
         // 状态
         this.isRunning = false;
@@ -69,22 +73,22 @@ class WalletMonitor {
      */
     async start() {
         try {
-            console.log(`🚀 启动钱包监控系统... ${this.config.enableNewWalletDetection ? '✅ 已启用' : '❌ 已禁用'}`);
+            this.logger.log(`🚀 启动钱包监控系统... ${this.config.enableNewWalletDetection ? '✅ 已启用' : '❌ 已禁用'}`);
             
             // 初始化数据库连接
             await this.redis.connect();
-            console.log('✅ Redis连接成功');
+            this.logger.success('Redis连接成功');
             
             // 初始化地址昵称映射
             MessageTemplates.initAddressNicknames();
             
             // 加载监控地址
             await this.loadMonitoredAddresses();
-            console.log(`✅ 已加载 ${this.monitoredAddresses.size} 个监控地址`);
+            this.logger.success(`已加载 ${this.monitoredAddresses.size} 个监控地址`);
             
             // 获取最新区块号
             this.lastProcessedBlock = await this.scanner.getLatestBlockNumber();
-            console.log(`✅ 当前最新区块: ${this.lastProcessedBlock}`);
+            this.logger.success(`当前最新区块: ${this.lastProcessedBlock}`);
             
             // 设置扫描器配置
             this.scanner.setConfig({
@@ -102,13 +106,13 @@ class WalletMonitor {
             this.isRunning = true;
             this.startMonitoringLoop();
             
-            console.log('✅ 钱包监控系统启动成功');
-            console.log(`🔧 新钱包识别: ${this.config.enableNewWalletDetection ? '✅ 已启用' : '❌ 已禁用'}`);
-            console.log(`🗄️ 数据库前缀: ${this.config.redisPrefix}`);
-            console.log(`💬 聊天ID: ${this.config.chatId}`);
+            this.logger.success('钱包监控系统启动成功');
+            this.logger.log(`🔧 新钱包识别: ${this.config.enableNewWalletDetection ? '✅ 已启用' : '❌ 已禁用'}`);
+            this.logger.log(`🗄️ 数据库前缀: ${this.config.redisPrefix}`);
+            this.logger.log(`💬 聊天ID: ${this.config.chatId}`);
             
         } catch (error) {
-            console.error('❌ 启动失败:', error.message);
+            this.logger.error('启动失败:', error.message);
             await this.sendErrorNotification(error);
             process.exit(1);
         }
@@ -118,7 +122,7 @@ class WalletMonitor {
      * 停止监控
      */
     async stop() {
-        console.log('🛑 正在停止钱包监控系统...');
+        this.logger.log('🛑 正在停止钱包监控系统...');
         this.isRunning = false;
         
         // 发送停止通知
@@ -133,10 +137,10 @@ class WalletMonitor {
         try {
             await this.redis.disconnect();
         } catch (error) {
-            console.warn('⚠️ 断开Redis连接时出错:', error.message);
+            this.logger.warn('⚠️ 断开Redis连接时出错:', error.message)
         }
         
-        console.log('✅ 钱包监控系统已停止');
+        this.logger.log('✅ 钱包监控系统已停止')
     }
 
     /**
@@ -160,10 +164,10 @@ class WalletMonitor {
                 }
             }
             
-            console.log(`📋 已加载监控地址: ${Array.from(this.monitoredAddresses).join(', ')}`);
+            this.logger.log(`📋 已加载监控地址: ${Array.from(this.monitoredAddresses).join(', ')}`)
             
         } catch (error) {
-            console.error('❌ 加载监控地址失败:', error.message);
+            this.logger.error('❌ 加载监控地址失败:', error.message)
             throw error;
         }
     }
@@ -177,7 +181,7 @@ class WalletMonitor {
                 await this.scanNewBlocks();
                 await this.sleep(this.config.scanInterval);
             } catch (error) {
-                console.error('❌ 监控循环错误:', error.message);
+                this.logger.error('监控循环错误:', error.message);
                 await this.sendErrorNotification(error);
                 await this.sleep(5000); // 错误后等待5秒再继续
             }
@@ -202,18 +206,18 @@ class WalletMonitor {
             let batchSize = this.config.batchSize;
             if (totalBlocksToProcess > 20) {
                 batchSize = Math.min(20, totalBlocksToProcess); // 最多并行处理20个区块
-                console.log(`⚡ 检测到落后 ${totalBlocksToProcess} 个区块，使用并行处理 (批次大小: ${batchSize})`);
+                this.logger.log(`⚡ 检测到落后 ${totalBlocksToProcess} 个区块，使用并行处理 (批次大小: ${batchSize})`);
             }
             
             const endBlock = Math.min(currentBlock, startBlock + batchSize - 1);
             
-            console.log(`🔍 扫描区块 ${startBlock} - ${endBlock} (共 ${endBlock - startBlock + 1} 个区块)`);
+            this.logger.log(`🔍 扫描区块 ${startBlock} - ${endBlock} (共 ${endBlock - startBlock + 1} 个区块)`);
             
             // 并行扫描区块
             const results = await this.scanner.scanBlockRangeParallel(startBlock, endBlock);
             
             if (results.length > 0) {
-                console.log(`📊 找到 ${results.length} 笔相关交易`);
+                this.logger.log(`📊 找到 ${results.length} 笔相关交易`);
                 await this.processTransactions(results);
             }
             
@@ -223,7 +227,7 @@ class WalletMonitor {
             this.stats.foundTransactions += results.length;
             
         } catch (error) {
-            console.error('❌ 扫描新区块失败:', error.message);
+            this.logger.error('扫描新区块失败:', error.message);
             throw error;
         }
     }
@@ -242,13 +246,13 @@ class WalletMonitor {
                     
                     // 检查是否为新钱包（如果开关开启）
                     if (this.config.enableNewWalletDetection) {
-                        console.log('检查新钱包标记');
+                        this.logger.log('检查新钱包标记')
                         await this.checkNewWallet(tx);
                     }
                 }
                 
             } catch (error) {
-                console.error('❌ 处理交易失败:', error.message);
+                this.logger.error('❌ 处理交易失败:', error.message)
             }
         }
     }
@@ -270,7 +274,7 @@ class WalletMonitor {
         await this.bot.sendHtml(this.config.chatId, message, this.config.threadId);
         this.stats.sentNotifications++;
         
-        console.log(`📤 已发送交易通知: ${analysis.walletName} (${analysis.received.length}接收, ${analysis.sent.length}发送)`);
+        this.logger.log(`📤 已发送交易通知: ${analysis.walletName} (${analysis.received.length}接收, ${analysis.sent.length}发送)`)
     }
 
     /**
@@ -285,7 +289,7 @@ class WalletMonitor {
             await this.checkNewWalletFromERC20(tx);
             
         } catch (error) {
-            console.error('❌ 检查新钱包失败:', error.message);
+            this.logger.error('❌ 检查新钱包失败:', error.message)
         }
     }
     
@@ -303,7 +307,7 @@ class WalletMonitor {
             const hasNoERC20Transfer = !tx.erc20Changes || tx.erc20Changes.length === 0;
             const minValue = tx.bnbChange.to >= this.config.minValue;
 
-            console.log(`minValue: ${minValue}  --  toAddress: ${toAddress}  --  tx.bnbChange.to: ${tx.bnbChange.to}`);
+            this.logger.log(`minValue: ${minValue}  --  toAddress: ${toAddress}  --  tx.bnbChange.to: ${tx.bnbChange.to.toString()}`)
 
             if (hasBNBTransfer && hasNoERC20Transfer && minValue) {
                 // 检查是否为EOA地址（不是合约地址）
@@ -312,10 +316,10 @@ class WalletMonitor {
                 if (isEOA) {
                     await this.addNewWallet(toAddress, tx.from.toLowerCase());
                 } else {
-                    console.log(`⚠️ 跳过合约地址: ${toAddress} (不是EOA)`);
+                    this.logger.log(`⚠️ 跳过合约地址: ${toAddress} (不是EOA)`)
                 }
             } else {
-                console.log(`⚠️ 跳过复杂交易: ${toAddress} (不是纯BNB转账)`);
+                this.logger.log(`⚠️ 跳过复杂交易: ${toAddress} (不是纯BNB转账)`)
             }
         }
     }
@@ -339,7 +343,7 @@ class WalletMonitor {
 
                     // 过滤未达到最小值的交易，未达最小值的去掉不进行后续检查
                     const isMinValue = minValue && change.formattedValue >= minValue
-                    console.log(`isMinValue: ${isMinValue}  --  fromAddress: ${fromAddress}  --  toAddress: ${toAddress}  --  tokenAddress: ${tokenAddress}  --  minValue: ${minValue}  --  change.formattedValue: ${change.formattedValue}`);
+                    this.logger.log(`isMinValue: ${isMinValue}  --  fromAddress: ${fromAddress}  --  toAddress: ${toAddress}  --  tokenAddress: ${tokenAddress}  --  minValue: ${minValue}  --  change.formattedValue: ${change.formattedValue}`)
                     
                     // 只检查涉及监控地址的ERC20转账
                     if (isMinValue && this.monitoredAddresses.has(fromAddress) && !this.monitoredAddresses.has(toAddress)) {
@@ -349,12 +353,12 @@ class WalletMonitor {
                         if (isEOA) {
                             await this.addNewWallet(toAddress, fromAddress);
                         } else {
-                            console.log(`⚠️ 跳过合约地址: ${toAddress} (不是EOA)`);
+                            this.logger.log(`⚠️ 跳过合约地址: ${toAddress} (不是EOA)`)
                         }
                     }
                 }
             } else {
-                console.log(`⚠️ 跳过复杂交易: 不是纯token转账或涉及多种token`);
+                this.logger.log(`⚠️ 跳过复杂交易: 不是纯token转账或涉及多种token`)
             }
         }
     }
@@ -394,7 +398,7 @@ class WalletMonitor {
                 // getIsCexDict
                 const isCex = await getIsCexDict(walletAddress);
                 if (isCex) {
-                    console.log(`⚠️ 跳过CEX钱包: ${walletAddress}`);
+                    this.logger.log(`⚠️ 跳过CEX钱包: ${walletAddress}`)
                     return;
                 }
                 
@@ -418,12 +422,12 @@ class WalletMonitor {
                 this.stats.sentNotifications++;
                 this.stats.newWalletsAdded++;
                 
-                console.log(`🆕 发现新钱包: ${walletAddress} (上级: ${fromName})`);
+                this.logger.log(`🆕 发现新钱包: ${walletAddress} (上级: ${fromName})`);
             } else {
-                console.log(`ℹ️ 地址已存在，跳过添加: ${walletAddress}`);
+                this.logger.log(`ℹ️ 地址已存在，跳过添加: ${walletAddress}`);
             }
         } catch (error) {
-            console.error(`❌ 添加新钱包失败 ${walletAddress}:`, error.message);
+            this.logger.error(`❌ 添加新钱包失败 ${walletAddress}:`, error.message)
         }
     }
 
@@ -440,7 +444,7 @@ class WalletMonitor {
             
             await this.bot.sendHtml(this.config.chatId, message, this.config.threadId);
         } catch (sendError) {
-            console.error('❌ 发送错误通知失败:', sendError.message);
+            this.logger.error('❌ 发送错误通知失败:', sendError.message)
         }
     }
 
@@ -459,7 +463,7 @@ class WalletMonitor {
             
             await this.bot.sendHtml(this.config.chatId, message, this.config.threadId);
         } catch (error) {
-            console.error('❌ 发送系统状态失败:', error.message);
+            this.logger.error('❌ 发送系统状态失败:', error.message)
         }
     }
 
@@ -547,7 +551,7 @@ class WalletMonitor {
             };
 
         } catch (error) {
-            console.error(`❌ 添加钱包失败:`, error.message);
+            this.logger.error(`❌ 添加钱包失败:`, error.message)
             return {
                 success: false,
                 message: `添加失败: ${error.message}`,
@@ -602,7 +606,7 @@ class WalletMonitor {
             };
 
         } catch (error) {
-            console.error(`❌ 删除钱包失败:`, error.message);
+            this.logger.error(`❌ 删除钱包失败:`, error.message)
             return {
                 success: false,
                 message: `删除失败: ${error.message}`,
@@ -668,7 +672,7 @@ class WalletMonitor {
             }
 
         } catch (error) {
-            console.error(`❌ 查询钱包失败:`, error.message);
+            this.logger.error(`❌ 查询钱包失败:`, error.message)
             return {
                 success: false,
                 message: `查询失败: ${error.message}`,
@@ -697,7 +701,7 @@ class WalletMonitor {
                 }
             };
         } catch (error) {
-            console.error(`❌ 获取统计信息失败:`, error.message);
+            this.logger.error(`❌ 获取统计信息失败:`, error.message)
             return {
                 success: false,
                 message: `获取统计信息失败: ${error.message}`,

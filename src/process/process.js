@@ -5,8 +5,9 @@ const { ethers } = require('ethers');
  * 支持原生BNB转账和ERC20代币交易识别
  */
 class TransactionProcessor {
-    constructor(provider) {
+    constructor(provider, logger) {
         this.provider = provider;
+        this.logger = logger;
         
         // ERC20 Transfer 事件签名
         this.TRANSFER_EVENT_SIGNATURE = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
@@ -40,7 +41,7 @@ class TransactionProcessor {
             const code = await this.provider.getCode(address);
             return code === '0x';
         } catch (error) {
-            console.error(`❌ 检查EOA失败 ${address}:`, error.message);
+            this.logger.error(`❌ 检查EOA失败 ${address}:`, error.message);
             return false;
         }
     }
@@ -86,8 +87,6 @@ class TransactionProcessor {
                 inputData: transaction.data || '0x'
             };
 
-            // console.log(result);
-
             // 检查是否为EOA
             if (transaction.to) {
                 result.isEOA = await this.isEOA(transaction.to);
@@ -107,7 +106,7 @@ class TransactionProcessor {
             return result;
 
         } catch (error) {
-            console.error(`❌ 解析交易失败 ${transaction.hash}:`, error.message);
+            this.logger.error(`❌ 解析交易失败 ${transaction.hash}:`, error.message);
             return null;
         }
     }
@@ -194,7 +193,7 @@ class TransactionProcessor {
                         }
                     }
                 } catch (error) {
-                    console.error(`❌ 解析Transfer事件失败:`, error.message);
+                    this.logger.error(`❌ 解析Transfer事件失败:`, error.message);
                 }
             }
         }
@@ -231,7 +230,7 @@ class TransactionProcessor {
             };
 
         } catch (error) {
-            console.error(`❌ 解析Transfer事件失败:`, error.message);
+            this.logger.error(`❌ 解析Transfer事件失败:`, error.message);
             return null;
         }
     }
@@ -258,7 +257,7 @@ class TransactionProcessor {
             return { name, symbol, decimals };
 
         } catch (error) {
-            console.error(`❌ 获取代币信息失败 ${tokenAddress}:`, error.message);
+            this.logger.error(`❌ 获取代币信息失败 ${tokenAddress}:`, error.message);
             return { name: 'Unknown', symbol: 'UNKNOWN', decimals: 18 };
         }
     }
@@ -289,14 +288,12 @@ class TransactionProcessor {
         for (let i = 0; i < transactions.length; i++) {
             const transaction = transactions[i];
             const receipt = receipts[i] || null;
-            // console.log('x');
             
             try {
                 const parsed = await this.parseTransaction(transaction, receipt);
                 if (parsed) {
                     results.push(parsed);
                 }
-                // console.log('xx');
                 
                 // 避免请求过于频繁
                 if (i % 10 === 0 && i > 0) {
@@ -304,7 +301,7 @@ class TransactionProcessor {
                 }
                 
             } catch (error) {
-                console.error(`❌ 处理交易失败 ${transaction.hash}:`, error.message);
+                this.logger.error(`❌ 处理交易失败 ${transaction.hash}:`, error.message);
             }
         }
         
@@ -320,7 +317,7 @@ class TransactionProcessor {
         try {
             return await this.provider.getTransactionReceipt(transactionHash);
         } catch (error) {
-            console.error(`❌ 获取交易收据失败 ${transactionHash}:`, error.message);
+            this.logger.error(`❌ 获取交易收据失败 ${transactionHash}:`, error.message);
             return null;
         }
     }
@@ -334,7 +331,7 @@ class TransactionProcessor {
         try {
             return await this.provider.getTransaction(transactionHash);
         } catch (error) {
-            console.error(`❌ 获取交易失败 ${transactionHash}:`, error.message);
+            this.logger.error(`❌ 获取交易失败 ${transactionHash}:`, error.message);
             return null;
         }
     }
@@ -413,7 +410,7 @@ if (require.main === module) {
         const txHash = '0x376e9add623dc0a1eaac5f7252cfcabab66fb746727d2debb92a4ceb310f3d20';
         const transaction = await processor.getTransaction(txHash);
         const receipt = await processor.getTransactionReceipt(txHash);
-        // console.log(receipt);
+
         processor.processTransactions([transaction], [receipt]).then(_r => {
             console.log(_r[0].erc20Changes);
         });

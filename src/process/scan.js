@@ -6,9 +6,10 @@ require('dotenv').config();
  * 区块扫描器 - 扫描指定区块区间的交易并解析
  */
 class BlockScanner {
-    constructor(providerUrl = 'https://dragon.maiko.icu/bsc2h') {
+    constructor(providerUrl = 'https://dragon.maiko.icu/bsc2h', logger) {
         this.provider = new ethers.JsonRpcProvider(providerUrl);
-        this.processor = new TransactionProcessor(this.provider);
+        this.logger = logger;
+        this.processor = new TransactionProcessor(this.provider, this.logger);
         
         // 监控的地址列表
         this.watchedAddresses = new Set();
@@ -31,9 +32,9 @@ class BlockScanner {
     addWatchedAddress(address) {
         if (ethers.isAddress(address)) {
             this.watchedAddresses.add(address.toLowerCase());
-            console.log(`✅ 已添加监控地址: ${address}`);
+            this.logger.success(`已添加监控地址: ${address}`);
         } else {
-            console.error(`❌ 无效地址: ${address}`);
+            this.logger.error(`无效地址: ${address}`);
         }
     }
 
@@ -43,7 +44,7 @@ class BlockScanner {
      */
     removeWatchedAddress(address) {
         this.watchedAddresses.delete(address.toLowerCase());
-        console.log(`🗑️ 已移除监控地址: ${address}`);
+        this.logger.log(`🗑️ 已移除监控地址: ${address}`);
     }
 
     /**
@@ -96,13 +97,13 @@ class BlockScanner {
 
             // 确保区块有时间戳
             if (!block.timestamp || isNaN(block.timestamp)) {
-                console.warn(`⚠️ 区块 ${blockNumber} 时间戳无效，跳过`);
+                this.logger.warn(`⚠️ 区块 ${blockNumber} 时间戳无效，跳过`);
                 return [];
             }
                         
             return block.prefetchedTransactions;
         } catch (error) {
-            console.error(`❌ 获取区块 ${blockNumber} 失败:`, error.message);
+            this.logger.error(`❌ 获取区块 ${blockNumber} 失败:`, error.message);
             return [];
         }
     }
@@ -116,7 +117,7 @@ class BlockScanner {
         try {
             return await this.provider.getTransactionReceipt(transactionHash);
         } catch (error) {
-            console.error(`❌ 获取交易收据失败 ${transactionHash}:`, error.message);
+            this.logger.error(`❌ 获取交易收据失败 ${transactionHash}:`, error.message);
             return null;
         }
     }
@@ -128,7 +129,7 @@ class BlockScanner {
      * @returns {Promise<Array>} 解析后的交易数据
      */
     async scanBlockRange(startBlock, endBlock) {
-        console.log(`🔍 开始扫描区块区间: ${startBlock} - ${endBlock}`);
+        this.logger.log(`🔍 开始扫描区块区间: ${startBlock} - ${endBlock}`);
         
         const allResults = [];
         const totalBlocks = endBlock - startBlock + 1;
@@ -138,13 +139,12 @@ class BlockScanner {
             try {
                 // 获取区块交易
                 const transactions = await this.getBlockTransactions(blockNumber);
-                // console.log(transactions[0]);
                 // 过滤交易
                 const filteredTxs = transactions.filter(tx => this.filterTransaction(tx));
-                console.log(filteredTxs.length);
+                this.logger.log(filteredTxs.length);
                 
                 if (filteredTxs.length > 0) {
-                    console.log(`📦 区块 ${blockNumber}: 找到 ${filteredTxs.length} 笔相关交易`);
+                    this.logger.log(`📦 区块 ${blockNumber}: 找到 ${filteredTxs.length} 笔相关交易`);
                     
                     // 获取交易收据
                     const receipts = [];
@@ -169,18 +169,18 @@ class BlockScanner {
                 // 显示进度
                 if (processedBlocks % 10 === 0 || processedBlocks === totalBlocks) {
                     const progress = ((processedBlocks / totalBlocks) * 100).toFixed(1);
-                    console.log(`📊 进度: ${progress}% (${processedBlocks}/${totalBlocks}) - 找到 ${allResults.length} 笔相关交易`);
+                    this.logger.log(`📊 进度: ${progress}% (${processedBlocks}/${totalBlocks}) - 找到 ${allResults.length} 笔相关交易`);
                 }
 
                 // 避免请求过于频繁
                 await new Promise(resolve => setTimeout(resolve, this.config.delay));
 
             } catch (error) {
-                console.error(`❌ 处理区块 ${blockNumber} 时出错:`, error.message);
+                this.logger.error(`❌ 处理区块 ${blockNumber} 时出错:`, error.message);
             }
         }
 
-        console.log(`✅ 扫描完成! 共找到 ${allResults.length} 笔相关交易`);
+        this.logger.log(`✅ 扫描完成! 共找到 ${allResults.length} 笔相关交易`);
         return allResults;
     }
 
@@ -191,10 +191,10 @@ class BlockScanner {
     async getLatestBlockNumber() {
         try {
             const blockNumber = await this.provider.getBlockNumber();
-            console.log(`📦 当前最新区块号: ${blockNumber}`);
+            this.logger.log(`📦 当前最新区块号: ${blockNumber}`);
             return blockNumber;
         } catch (error) {
-            console.error('❌ 获取最新区块号失败:', error.message);
+            this.logger.error('❌ 获取最新区块号失败:', error.message);
             return 0;
         }
     }
@@ -205,7 +205,7 @@ class BlockScanner {
      */
     setConfig(config) {
         this.config = { ...this.config, ...config };
-        console.log('⚙️ 配置已更新:', this.config);
+        this.logger.log('⚙️ 配置已更新:', this.config);
     }
 
     /**
@@ -229,49 +229,49 @@ class BlockScanner {
      * @param {Array} results - 扫描结果
      */
     printResults(results) {
-        console.log('\n📋 扫描结果:');
-        console.log('='.repeat(100));
+        this.logger.log('\n📋 扫描结果:')
+        this.logger.log('='.repeat(100))
         
         if (results.length === 0) {
-            console.log('❌ 未找到符合条件的交易');
+            this.logger.log('❌ 未找到符合条件的交易')
             return;
         }
 
         results.forEach((tx, index) => {
-            console.log(`\n${index + 1}. 交易哈希: ${tx.hash}`);
-            console.log(`   区块号: ${tx.blockNumber}`);
-            console.log(`   时间: ${tx.timestamp}`);
-            console.log(`   发送方: ${tx.from}`);
-            console.log(`   接收方: ${tx.to}`);
-            console.log(`   交易类型: ${tx.transactionType}`);
-            console.log(`   是否转账: ${tx.isTransfer ? '✅' : '❌'}`);
-            console.log(`   是否ERC20: ${tx.isERC20Transaction ? '✅' : '❌'}`);
-            console.log(`   目标是否EOA: ${tx.isEOA ? '✅' : '❌'}`);
-            console.log(`   交易状态: ${tx.success ? '✅ 成功' : '❌ 失败'}`);
+            this.logger.log(`\n${index + 1}. 交易哈希: ${tx.hash}`)
+            this.logger.log(`   区块号: ${tx.blockNumber}`)
+            this.logger.log(`   时间: ${tx.timestamp}`)
+            this.logger.log(`   发送方: ${tx.from}`)
+            this.logger.log(`   接收方: ${tx.to}`)
+            this.logger.log(`   交易类型: ${tx.transactionType}`)
+            this.logger.log(`   是否转账: ${tx.isTransfer ? '✅' : '❌'}`)
+            this.logger.log(`   是否ERC20: ${tx.isERC20Transaction ? '✅' : '❌'}`)
+            this.logger.log(`   目标是否EOA: ${tx.isEOA ? '✅' : '❌'}`)
+            this.logger.log(`   交易状态: ${tx.success ? '✅ 成功' : '❌ 失败'}`)
             
             // BNB变化
             if (tx.bnbChange.from !== '0' || tx.bnbChange.to !== '0') {
-                console.log(`   BNB变化:`);
+                this.logger.log(`   BNB变化:`)
                 if (tx.bnbChange.from !== '0') {
-                    console.log(`     发送方: ${tx.bnbChange.formatted.from}`);
+                    this.logger.log(`     发送方: ${tx.bnbChange.formatted.from}`)
                 }
                 if (tx.bnbChange.to !== '0') {
-                    console.log(`     接收方: ${tx.bnbChange.formatted.to}`);
+                    this.logger.log(`     接收方: ${tx.bnbChange.formatted.to}`)
                 }
             }
             
             // ERC20变化
             if (tx.erc20Changes.length > 0) {
-                console.log(`   ERC20变化:`);
+                this.logger.log(`   ERC20变化:`)
                 tx.erc20Changes.forEach((change, i) => {
-                    console.log(`     ${i + 1}. ${change.formatted} (${change.tokenName})`);
-                    console.log(`        从: ${change.from}`);
-                    console.log(`        到: ${change.to}`);
+                    this.logger.log(`     ${i + 1}. ${change.formatted} (${change.tokenName})`)
+                    this.logger.log(`        从: ${change.from}`)
+                    this.logger.log(`        到: ${change.to}`)
                 });
             }
             
             // Gas信息
-            console.log(`   Gas: ${tx.gas.formatted.price} (使用: ${tx.gas.formatted.used})`);
+            this.logger.log(`   Gas: ${tx.gas.formatted.price} (使用: ${tx.gas.formatted.used})`)
         });
     }
 
@@ -282,7 +282,7 @@ class BlockScanner {
      * @returns {Promise<Array>} 解析后的交易数据
      */
     async scanBlockRangeParallel(startBlock, endBlock) {
-        console.log(`⚡ 开始并行扫描区块区间: ${startBlock} - ${endBlock}`);
+        this.logger.log(`⚡ 开始并行扫描区块区间: ${startBlock} - ${endBlock}`);
         
         const totalBlocks = endBlock - startBlock + 1;
         const blockNumbers = Array.from({ length: totalBlocks }, (_, i) => startBlock + i);
@@ -294,7 +294,7 @@ class BlockScanner {
         for (let i = 0; i < blockNumbers.length; i += concurrency) {
             const batch = blockNumbers.slice(i, i + concurrency);
             
-            console.log(`🔄 处理批次 ${Math.floor(i / concurrency) + 1}: 区块 ${batch[0]} - ${batch[batch.length - 1]}`);
+            this.logger.log(`🔄 处理批次 ${Math.floor(i / concurrency) + 1}: 区块 ${batch[0]} - ${batch[batch.length - 1]}`);
             
             // 并行处理当前批次
             const batchPromises = batch.map(blockNumber => this.processBlock(blockNumber));
@@ -305,14 +305,14 @@ class BlockScanner {
                 if (result.status === 'fulfilled' && result.value.length > 0) {
                     results.push(...result.value);
                 } else if (result.status === 'rejected') {
-                    console.error(`❌ 区块 ${batch[index]} 处理失败:`, result.reason.message);
+                    this.logger.error(`❌ 区块 ${batch[index]} 处理失败:`, result.reason.message);
                 }
             });
             
             // 显示进度
             const processed = Math.min(i + concurrency, blockNumbers.length);
             const progress = ((processed / totalBlocks) * 100).toFixed(1);
-            console.log(`📊 进度: ${progress}% (${processed}/${totalBlocks}) - 找到 ${results.length} 笔相关交易`);
+            this.logger.log(`📊 进度: ${progress}% (${processed}/${totalBlocks}) - 找到 ${results.length} 笔相关交易`);
             
             // 批次间短暂延迟，避免RPC过载
             if (i + concurrency < blockNumbers.length) {
@@ -320,7 +320,7 @@ class BlockScanner {
             }
         }
 
-        console.log(`✅ 并行扫描完成! 共找到 ${results.length} 笔相关交易`);
+        this.logger.log(`✅ 并行扫描完成! 共找到 ${results.length} 笔相关交易`);
         return results;
     }
 
@@ -341,7 +341,7 @@ class BlockScanner {
                 return [];
             }
             
-            console.log(`📦 区块 ${blockNumber}: 找到 ${filteredTxs.length} 笔相关交易`);
+            this.logger.log(`📦 区块 ${blockNumber}: 找到 ${filteredTxs.length} 笔相关交易`);
             
             // 并行获取交易收据
             const receiptPromises = filteredTxs.map(tx => this.getTransactionReceipt(tx.hash));
@@ -357,8 +357,8 @@ class BlockScanner {
                     validTransactions.push(filteredTxs[index]);
                     validReceipts.push(result.value);
                 } else {
-                    console.warn(`⚠️ 跳过未确认交易 ${filteredTxs[index].hash}:`, 
-                        result.status === 'fulfilled' ? '无收据' : result.reason.message);
+                    this.logger.warn(`⚠️ 跳过未确认交易 ${filteredTxs[index].hash}:`, 
+                        result.status === 'fulfilled' ? '无收据' : result.reason.message)
                 }
             });
             
@@ -373,7 +373,7 @@ class BlockScanner {
             return processedTxs.map(tx => this.processor.formatOutput(tx));
             
         } catch (error) {
-            console.error(`❌ 处理区块 ${blockNumber} 时出错:`, error.message);
+            this.logger.error(`❌ 处理区块 ${blockNumber} 时出错:`, error.message);
             return [];
         }
     }
@@ -383,8 +383,8 @@ class BlockScanner {
      * @param {Array} results - 扫描结果
      */
     generateReport(results) {
-        console.log('\n📊 统计报告:');
-        console.log('='.repeat(50));
+        this.logger.log('\n📊 统计报告:');
+        this.logger.log('='.repeat(50));
         
         const stats = {
             totalTransactions: results.length,
@@ -428,18 +428,18 @@ class BlockScanner {
             });
         });
 
-        console.log(`总交易数: ${stats.totalTransactions}`);
-        console.log(`BNB转账: ${stats.bnbTransfers}`);
-        console.log(`ERC20交易: ${stats.erc20Transactions}`);
-        console.log(`合约调用: ${stats.contractCalls}`);
-        console.log(`成功交易: ${stats.successfulTransactions}`);
-        console.log(`失败交易: ${stats.failedTransactions}`);
-        console.log(`EOA目标: ${stats.eoaTargets}`);
-        console.log(`合约目标: ${stats.contractTargets}`);
-        console.log(`涉及代币类型: ${stats.tokenTypes.size} 种`);
+        this.logger.log(`总交易数: ${stats.totalTransactions}`);
+        this.logger.log(`BNB转账: ${stats.bnbTransfers}`);
+        this.logger.log(`ERC20交易: ${stats.erc20Transactions}`);
+        this.logger.log(`合约调用: ${stats.contractCalls}`);
+        this.logger.log(`成功交易: ${stats.successfulTransactions}`);
+        this.logger.log(`失败交易: ${stats.failedTransactions}`);
+        this.logger.log(`EOA目标: ${stats.eoaTargets}`);
+        this.logger.log(`合约目标: ${stats.contractTargets}`);
+        this.logger.log(`涉及代币类型: ${stats.tokenTypes.size} 种`);
         
         if (stats.tokenTypes.size > 0) {
-            console.log(`代币列表: ${Array.from(stats.tokenTypes).join(', ')}`);
+            this.logger.log(`代币列表: ${Array.from(stats.tokenTypes).join(', ')}`);
         }
     }
 }

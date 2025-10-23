@@ -241,19 +241,22 @@ if (require.main === module) {
         const cengji_walletMonitor = new WalletMonitor({
             enableNewWalletDetection: true,
             redisPrefix: cengji_prefix,
-            chatId: cengji_chatId
+            chatId: cengji_chatId,
+            instanceName: 'cengji'
         });
         
         const noKey_walletMonitor = new WalletMonitor({
             enableNewWalletDetection: false,
             redisPrefix: noKey_prefix,
-            chatId: noKey_chatId
+            chatId: noKey_chatId,
+            instanceName: 'noKey'
         });
         
         const me_walletMonitor = new WalletMonitor({
             enableNewWalletDetection: false,
             redisPrefix: me_prefix,
-            chatId: me_chatId
+            chatId: me_chatId,
+            instanceName: 'me'
         });
 
         await cengji_walletMonitor.start();
