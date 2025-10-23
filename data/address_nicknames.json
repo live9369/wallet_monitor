@@ -1,0 +1,12 @@
+{
+  "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2",
+  "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap V3",
+  "0x1b96b92314c44b159149f7e0303511fb2fc4774f": "PancakeSwap Router",
+  "0x05ff2b0db69458a0750badebc4f9e13add608c7f": "PancakeSwap Factory",
+  "0xca143ce0fe65960e6aa4d42c8d3c1611192da431": "PancakeSwap Factory V2",
+  "0x1de460f363af910f51726def188f9004276bf4bc": "SwapX (Proxy) ",
+  "0xccc0b59e6a1a6e3648a8c3ceeb3b84be95c04444": "Trading Contract",
+  "0x0000000000000000000000000000000000000000": "Burn Address",
+  "0x000000000000000000000000000000000000dead": "Dead Address",
+  "0x5c952063c7fc8610ffdb798152d69f0b9550762b": "Four.meme"
+}
