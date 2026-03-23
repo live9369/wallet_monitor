@@ -12,7 +12,7 @@ require('dotenv').config();
  * 从数据库获取监控地址，监控最新区块，推送交易通知
  */
 class WalletMonitor {
-    constructor(options = {}) {
+    constructor(options = {}, url = 'https://dragon.maiko.icu/bsc2h') {
         // 配置
         this.config = {
             chatId: options.chatId || process.env.CHAT_ID || '-4940120432',
@@ -22,6 +22,7 @@ class WalletMonitor {
             minValue: ethers.parseEther(options.minValue || process.env.MIN_VALUE || '0.000'), // 最小交易金额
             enableNewWalletDetection: options.enableNewWalletDetection !== false, // 新钱包识别开关，默认开启
             redisPrefix: options.redisPrefix || 'wallet:', // 数据库前缀，用于数据隔离
+            scanUrl: options.scanUrl || 'https://bscscan.com/', // 区块链浏览器地址
         };
 
         this.config.baseToken = [
@@ -49,7 +50,7 @@ class WalletMonitor {
 
         // 初始化日志器
         this.logger = new Logger(options.instanceName);
-        this.scanner = new BlockScanner(process.env.RPC_URL || 'https://dragon.maiko.icu/bsc2h', this.logger);
+        this.scanner = new BlockScanner(url, this.logger);
         
         // 状态
         this.isRunning = false;
@@ -268,7 +269,8 @@ class WalletMonitor {
             walletName: analysis.walletName,
             walletAddress: analysis.walletAddress,
             received: analysis.received,
-            sent: analysis.sent
+            sent: analysis.sent,
+            scanUrl: this.config.scanUrl
         });
         
         await this.bot.sendHtml(this.config.chatId, message, this.config.threadId);
@@ -403,7 +405,7 @@ class WalletMonitor {
                 }
                 
                 // 添加新钱包到数据库
-                // await this.redis.addNodeLite(walletAddress, fromName, fromAddress);
+                await this.redis.addNodeLite(walletAddress, fromName, fromAddress);
                 
                 // 更新本地缓存
                 this.monitoredAddresses.add(walletAddress);
@@ -528,20 +530,20 @@ class WalletMonitor {
                 };
             }
 
-            // 手动添加的地址都是level为0的最顶级地址，refer为空
+            // 手动添加的地址都是最顶级地址（Level 1），refer为空
             await this.redis.addNodeLite(wallet, name, '');
             
             // 更新内存缓存
-            this.monitoredAddresses.add(wallet);
+            this.monitoredAddresses.add(wallet.toLowerCase());
             this.addressNames.set(wallet.toLowerCase(), name);
-            this.scanner.addWatchedAddress(wallet);
+            this.scanner.addWatchedAddress(wallet.toLowerCase());
             
             // 获取添加后的信息
             const nodeInfo = await this.redis.getNodeInfo(wallet);
             
             return {
                 success: true,
-                message: `成功添加钱包: ${name} (${wallet}) - Level 0`,
+                message: `成功添加钱包: ${name} (${wallet}) - Level ${nodeInfo?.lv || 1}`,
                 data: {
                     chatId: this.config.chatId,
                     wallet,
@@ -561,7 +563,7 @@ class WalletMonitor {
     }
 
     /**
-     * 删除监控地址
+     * 删除监控地址（包括所有子集）
      * @param {string} wallet - 钱包地址
      * @returns {Promise<Object>} 操作结果
      */
@@ -587,21 +589,112 @@ class WalletMonitor {
 
             // 获取删除前的信息
             const nodeInfo = await this.redis.getNodeInfo(wallet);
+            this.logger.log(`🗑️ 开始删除钱包: ${wallet} (层级: ${nodeInfo?.lv || 0})`);
             
-            // 从数据库删除钱包
-            await this.redis.removeNode(wallet);
+            // 递归查找所有子集地址
+            this.logger.log(`🔍 正在查找所有子集地址...`);
+            const descendants = await this.redis.getAllDescendants(wallet);
+            this.logger.log(`📊 找到 ${descendants.length} 个子集地址`);
             
-            // 从内存缓存中删除
-            this.monitoredAddresses.delete(wallet);
-            this.addressNames.delete(wallet.toLowerCase());
-            this.scanner.removeWatchedAddress(wallet);
+            // 记录要删除的地址列表（包括自己和所有子集）
+            // 使用 Set 去重，并统一转换为小写
+            const allToDeleteSet = new Set();
+            allToDeleteSet.add(wallet.toLowerCase());
+            descendants.forEach(addr => allToDeleteSet.add(addr.toLowerCase()));
+            const allToDelete = Array.from(allToDeleteSet);
+            
+            this.logger.log(`📋 准备删除 ${allToDelete.length} 个地址（包括主地址）`);
+            
+            // 优化：一次性获取所有需要删除的地址信息，减少数据库查询次数
+            // 先删除所有子集（从最深层次开始，避免引用问题）
+            // 按层级排序，先删除层级高的（子集的子集）
+            const toDeleteWithLevel = [];
+            const allNodeInfoMap = new Map(); // 缓存节点信息
+            
+            // 批量获取所有节点信息
+            for (const addr of allToDelete) {
+                try {
+                    const info = await this.redis.getNodeInfo(addr);
+                    if (info) {
+                        allNodeInfoMap.set(addr.toLowerCase(), info);
+                        toDeleteWithLevel.push({ wallet: addr, level: info.lv || 0 });
+                    }
+                } catch (error) {
+                    this.logger.warn(`⚠️ 获取节点信息失败 ${addr}:`, error.message);
+                }
+            }
+            
+            // 按层级降序排序（先删除深层级的）
+            toDeleteWithLevel.sort((a, b) => b.level - a.level);
+            
+            const deletedAddresses = [];
+            const deletedNames = [];
+            const mainWalletLower = wallet.toLowerCase();
+            const totalCount = toDeleteWithLevel.length;
+            
+            this.logger.log(`🚀 开始删除 ${totalCount} 个地址...`);
+            
+            // 删除所有地址（包括自己和子集）
+            for (let i = 0; i < toDeleteWithLevel.length; i++) {
+                const item = toDeleteWithLevel[i];
+                const addr = item.wallet;
+                
+                try {
+                    // 从缓存的节点信息中获取名称，减少数据库查询
+                    const cachedInfo = allNodeInfoMap.get(addr.toLowerCase());
+                    const name = cachedInfo?.name || await this.redis.getNameByWallet(addr);
+                    const isMainWallet = addr.toLowerCase() === mainWalletLower;
+                    
+                    // 从数据库删除钱包
+                    await this.redis.removeNode(addr);
+                    
+                    // 从内存缓存中删除
+                    this.monitoredAddresses.delete(addr);
+                    this.monitoredAddresses.delete(addr.toLowerCase());
+                    this.addressNames.delete(addr.toLowerCase());
+                    this.scanner.removeWatchedAddress(addr);
+                    
+                    deletedAddresses.push(addr);
+                    // 保存删除信息，标记是否是主地址
+                    if (name) {
+                        deletedNames.push({ name: `${name}(${addr})`, address: addr, isMain: isMainWallet });
+                    } else {
+                        deletedNames.push({ name: addr, address: addr, isMain: isMainWallet });
+                    }
+                    
+                    // 每10个地址记录一次进度，避免日志过多
+                    if ((i + 1) % 10 === 0 || i === totalCount - 1) {
+                        this.logger.log(`🗑️ 删除进度: ${i + 1}/${totalCount} (${name || addr})`);
+                    }
+                } catch (error) {
+                    this.logger.error(`❌ 删除子集钱包失败 ${addr}:`, error.message);
+                }
+            }
+            
+            const deletedCount = deletedAddresses.length;
+            const message = deletedCount > 1 
+                ? `成功删除钱包 ${wallet} 及其 ${deletedCount - 1} 个子集（共 ${deletedCount} 个）`
+                : `成功删除钱包: ${wallet}`;
+            
+            this.logger.log(`✅ 删除完成: ${message}`);
+            
+            // 对删除的地址进行排序：主地址在前，然后按地址排序
+            deletedNames.sort((a, b) => {
+                if (a.isMain !== b.isMain) {
+                    return a.isMain ? -1 : 1; // 主地址在前
+                }
+                return a.address.localeCompare(b.address);
+            });
             
             return {
                 success: true,
-                message: `成功删除钱包: ${wallet}`,
+                message: message,
                 data: {
                     wallet,
-                    deletedInfo: nodeInfo
+                    deletedInfo: nodeInfo,
+                    deletedCount: deletedCount,
+                    deletedAddresses: deletedAddresses,
+                    deletedNames: deletedNames.map(item => item.name) // 只返回名称数组
                 }
             };
 
@@ -673,6 +766,118 @@ class WalletMonitor {
 
         } catch (error) {
             this.logger.error(`❌ 查询钱包失败:`, error.message)
+            return {
+                success: false,
+                message: `查询失败: ${error.message}`,
+                data: null
+            };
+        }
+    }
+
+    /**
+     * 查询指定地址的所有子集
+     * @param {string} wallet - 钱包地址
+     * @returns {Promise<Object>} 查询结果
+     */
+    async queryDescendants(wallet) {
+        try {
+            if (!wallet) {
+                return {
+                    success: false,
+                    message: '钱包地址不能为空',
+                    data: null
+                };
+            }
+
+            // 检查地址是否存在
+            const exists = await this.redis.existsWallet(wallet);
+            if (!exists) {
+                return {
+                    success: false,
+                    message: `地址不存在: ${wallet}`,
+                    data: null
+                };
+            }
+
+            // 获取主地址信息
+            const mainNodeInfo = await this.redis.getNodeInfo(wallet);
+            const mainName = await this.redis.getNameByWallet(wallet);
+
+            // 递归查找所有子集地址
+            this.logger.log(`🔍 正在查找 ${wallet} 的所有子集...`);
+            const descendants = await this.redis.getAllDescendants(wallet);
+            this.logger.log(`📊 找到 ${descendants.length} 个子集地址`);
+
+            if (descendants.length === 0) {
+                return {
+                    success: true,
+                    message: '该地址没有子集',
+                    data: {
+                        wallet: wallet,
+                        name: mainName,
+                        level: mainNodeInfo?.lv || 0,
+                        descendants: [],
+                        count: 0
+                    }
+                };
+            }
+
+            // 获取每个子集的完整信息
+            const descendantsList = [];
+            const levelCount = new Map(); // 统计各层级的数量
+
+            for (const descWallet of descendants) {
+                try {
+                    const nodeInfo = await this.redis.getNodeInfo(descWallet);
+                    const name = await this.redis.getNameByWallet(descWallet);
+                    
+                    if (nodeInfo) {
+                        const level = nodeInfo.lv || 0;
+                        levelCount.set(level, (levelCount.get(level) || 0) + 1);
+                        
+                        descendantsList.push({
+                            wallet: descWallet,
+                            name: name || 'Unknown',
+                            level: level,
+                            refer: nodeInfo.refer || '',
+                            nodeInfo: nodeInfo
+                        });
+                    }
+                } catch (error) {
+                    this.logger.warn(`⚠️ 获取子集信息失败 ${descWallet}:`, error.message);
+                    descendantsList.push({
+                        wallet: descWallet,
+                        name: 'Unknown',
+                        level: 0,
+                        refer: '',
+                        nodeInfo: null
+                    });
+                }
+            }
+
+            // 按层级和地址排序
+            descendantsList.sort((a, b) => {
+                if (a.level !== b.level) {
+                    return a.level - b.level; // 先按层级升序
+                }
+                return a.wallet.localeCompare(b.wallet); // 再按地址排序
+            });
+
+            return {
+                success: true,
+                message: `找到 ${descendants.length} 个子集`,
+                data: {
+                    wallet: wallet,
+                    name: mainName,
+                    level: mainNodeInfo?.lv || 0,
+                    descendants: descendantsList,
+                    count: descendants.length,
+                    levelDistribution: Object.fromEntries(levelCount)
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`❌ 查询子集失败:`, error.message);
             return {
                 success: false,
                 message: `查询失败: ${error.message}`,

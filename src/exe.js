@@ -234,6 +234,156 @@ class DatabaseExecutor {
     }
 
     /**
+     * 查询指定地址的所有子集
+     * @param {string} wallet - 钱包地址
+     * @param {boolean} includeDetails - 是否包含详细信息（默认 true）
+     * @returns {Promise<Object>} 查询结果
+     */
+    async queryDescendants(wallet, includeDetails = true) {
+        try {
+            // 检查地址是否存在
+            const exists = await this.redis.existsWallet(wallet);
+            if (!exists) {
+                console.log(`❌ 地址不存在: ${wallet}`);
+                return {
+                    success: false,
+                    message: `地址不存在: ${wallet}`,
+                    data: null
+                };
+            }
+
+            // 获取主地址信息
+            const mainNodeInfo = await this.redis.getNodeInfo(wallet);
+            const mainName = await this.redis.getNameByWallet(wallet);
+
+            console.log(`\n📋 查询地址信息:`);
+            console.log(`地址: ${wallet}`);
+            console.log(`名称: ${mainName || 'Unknown'}`);
+            console.log(`层级: ${mainNodeInfo?.lv || 0}`);
+            console.log(`上级: ${mainNodeInfo?.refer || '无'}`);
+
+            // 递归查找所有子集地址
+            console.log(`\n🔍 正在查找所有子集...`);
+            const descendants = await this.redis.getAllDescendants(wallet);
+            console.log(`📊 找到 ${descendants.length} 个子集地址`);
+
+            if (descendants.length === 0) {
+                console.log(`\n✅ 该地址没有子集`);
+                return {
+                    success: true,
+                    message: '该地址没有子集',
+                    data: {
+                        wallet: wallet,
+                        name: mainName,
+                        level: mainNodeInfo?.lv || 0,
+                        descendants: [],
+                        count: 0
+                    }
+                };
+            }
+
+            // 如果需要详细信息，获取每个子集的完整信息
+            const descendantsList = [];
+            const levelCount = new Map(); // 统计各层级的数量
+
+            if (includeDetails) {
+                for (const descWallet of descendants) {
+                    try {
+                        const nodeInfo = await this.redis.getNodeInfo(descWallet);
+                        const name = await this.redis.getNameByWallet(descWallet);
+                        
+                        if (nodeInfo) {
+                            const level = nodeInfo.lv || 0;
+                            levelCount.set(level, (levelCount.get(level) || 0) + 1);
+                            
+                            descendantsList.push({
+                                wallet: descWallet,
+                                name: name || 'Unknown',
+                                level: level,
+                                refer: nodeInfo.refer || '',
+                                id: nodeInfo.id || ''
+                            });
+                        }
+                    } catch (error) {
+                        console.warn(`⚠️ 获取子集信息失败 ${descWallet}:`, error.message);
+                        descendantsList.push({
+                            wallet: descWallet,
+                            name: 'Unknown',
+                            level: 0,
+                            refer: '',
+                            id: ''
+                        });
+                    }
+                }
+
+                // 按层级和地址排序
+                descendantsList.sort((a, b) => {
+                    if (a.level !== b.level) {
+                        return a.level - b.level; // 先按层级升序
+                    }
+                    return a.wallet.localeCompare(b.wallet); // 再按地址排序
+                });
+
+                // 显示详细信息
+                console.log(`\n📋 子集详细信息 (共 ${descendantsList.length} 个):`);
+                console.log('='.repeat(80));
+                
+                let currentLevel = -1;
+                for (const item of descendantsList) {
+                    if (item.level !== currentLevel) {
+                        if (currentLevel >= 0) {
+                            console.log(''); // 层级之间空行
+                        }
+                        console.log(`📍 层级 ${item.level} (共 ${levelCount.get(item.level) || 0} 个):`);
+                        currentLevel = item.level;
+                    }
+                    console.log(`  • ${item.name} (${item.wallet})`);
+                    console.log(`    上级: ${item.refer || '无'}`);
+                }
+            } else {
+                // 只显示地址列表
+                console.log(`\n📋 子集地址列表 (共 ${descendants.length} 个):`);
+                descendants.forEach((addr, index) => {
+                    console.log(`${index + 1}. ${addr}`);
+                });
+            }
+
+            // 显示统计信息
+            console.log('\n' + '='.repeat(80));
+            console.log(`📊 统计信息:`);
+            console.log(`总子集数: ${descendants.length}`);
+            if (levelCount.size > 0) {
+                console.log(`各层级分布:`);
+                const sortedLevels = Array.from(levelCount.keys()).sort((a, b) => a - b);
+                for (const level of sortedLevels) {
+                    console.log(`  层级 ${level}: ${levelCount.get(level)} 个`);
+                }
+            }
+
+            return {
+                success: true,
+                message: `找到 ${descendants.length} 个子集`,
+                data: {
+                    wallet: wallet,
+                    name: mainName,
+                    level: mainNodeInfo?.lv || 0,
+                    descendants: includeDetails ? descendantsList : descendants.map(addr => ({ wallet: addr })),
+                    count: descendants.length,
+                    levelDistribution: Object.fromEntries(levelCount)
+                }
+            };
+
+        } catch (error) {
+            console.error(`❌ 查询子集失败:`, error.message);
+            return {
+                success: false,
+                message: `查询失败: ${error.message}`,
+                data: null
+            };
+        }
+    }
+
+    /**
      * 显示当前配置
      */
     async showConfig() {
@@ -283,6 +433,7 @@ class DatabaseExecutor {
   import <file>                   - 从JSON文件批量导入
   export <file>                   - 导出数据到JSON文件
   list                           - 列出所有监控地址
+  query <wallet>                  - 查询指定地址的所有子集
   remove <wallet>                - 删除指定监控地址
   clear                          - 清空所有监控数据
   config                         - 显示当前配置
@@ -294,6 +445,7 @@ class DatabaseExecutor {
   node src/exe.js import data/wallets.json
   node src/exe.js export backup/wallets.json
   node src/exe.js list
+  node src/exe.js query 0x1234...
   node src/exe.js remove 0x1234...
 
 JSON文件格式:
@@ -358,6 +510,14 @@ async function main() {
 
             case 'list':
                 await executor.listWallets();
+                break;
+
+            case 'query':
+                if (args.length < 2) {
+                    console.error('❌ 用法: query <wallet>');
+                    process.exit(1);
+                }
+                await executor.queryDescendants(args[1], true);
                 break;
 
             case 'remove':

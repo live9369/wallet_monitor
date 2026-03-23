@@ -77,7 +77,7 @@ if (require.main === module) {
 //     console.log(res);
 //   });
 
-    const address = '0xa1df5a39d5e779592bb76b9484745732e723f9ef';
+    const address = '0x7d9471511A6c027e978ADaf02014c3d2F40a0571';
     getCexDict(address).then(res => {
         console.log(res);
     });

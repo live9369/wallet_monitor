@@ -28,6 +28,15 @@ class Logger {
         const logFile = path.join(this.logDir, `${this.instanceName}.log`);
         const errorFile = path.join(this.logDir, `${this.instanceName}_error.log`);
         
+        // 清理旧的日志文件（如果存在）
+        if (fs.existsSync(logFile)) {
+            fs.unlinkSync(logFile);
+        }
+        if (fs.existsSync(errorFile)) {
+            fs.unlinkSync(errorFile);
+        }
+        
+        // 创建新的日志流（使用追加模式，但因为是新文件所以等同于覆盖）
         this.logStream = fs.createWriteStream(logFile, { flags: 'a' });
         this.errorStream = fs.createWriteStream(errorFile, { flags: 'a' });
     }

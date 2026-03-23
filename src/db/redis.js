@@ -8,19 +8,108 @@ class RefRedis {
    * @param {string} prefix key 前缀，防冲突
    */
   constructor(options = {}, prefix = "ref:") {
-    this.redis = createClient(options);
+    // 合并默认配置，启用自动重连
+    const defaultOptions = {
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 10) {
+            console.error('❌ Redis重连失败次数过多，停止重试');
+            return new Error('Redis重连失败');
+          }
+          // 指数退避：1秒、2秒、4秒...最多5秒
+          const delay = Math.min(retries * 1000, 5000);
+          console.log(`🔄 Redis重连中... (第${retries}次，${delay}ms后重试)`);
+          return delay;
+        },
+        connectTimeout: 10000,
+      },
+    };
+    
+    // 合并用户配置和默认配置
+    const mergedOptions = {
+      ...defaultOptions,
+      ...options,
+      socket: {
+        ...defaultOptions.socket,
+        ...(options.socket || {})
+      }
+    };
+    
+    this.redis = createClient(mergedOptions);
     this.prefix = prefix;
 
     // 连接错误监听
     this.redis.on("error", (err) => {
       console.error("Redis error:", err);
     });
+
+    // 监听重连事件
+    this.redis.on("reconnecting", () => {
+      console.log("🔄 Redis正在重连...");
+    });
+
+    // 监听连接就绪事件
+    this.redis.on("ready", () => {
+      console.log("✅ Redis连接就绪");
+    });
   }
 
+  /**
+   * 确保Redis连接有效
+   * 如果连接断开，会尝试重新连接
+   */
   async connect() {
-    if (!this.redis.isOpen) {
-      await this.redis.connect();
+    try {
+      // 如果连接已断开，尝试重连
+      if (!this.redis.isOpen) {
+        try {
+          await this.redis.connect();
+        } catch (connectError) {
+          // 如果是"客户端正在连接中"的错误，忽略
+          if (connectError.message && !connectError.message.includes('Client is already connecting')) {
+            throw connectError;
+          }
+        }
+      }
+
+      // 验证连接是否真的可用（通过ping测试）
+      try {
+        await this.redis.ping();
+      } catch (pingError) {
+        // ping失败，说明连接无效，强制重连
+        console.warn('⚠️ Redis连接无效，尝试重新连接...');
+        try {
+          if (this.redis.isOpen) {
+            await this.redis.quit().catch(() => {}); // 忽略关闭错误
+          }
+        } catch (e) {
+          // 忽略关闭错误
+        }
+        
+        // 等待一下再重连
+        await new Promise(resolve => setTimeout(resolve, 100));
+        await this.redis.connect();
+        // 再次验证
+        await this.redis.ping();
+      }
+    } catch (error) {
+      // 如果是连接数限制错误，等待后重试
+      if (error.message && error.message.includes('max number of clients')) {
+        console.warn('⚠️ Redis连接数已达上限，等待后重试...');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 等待2秒
+        // 递归重试（最多3次）
+        if (!this._retryCount) this._retryCount = 0;
+        if (this._retryCount < 3) {
+          this._retryCount++;
+          return this.connect();
+        }
+        this._retryCount = 0;
+      }
+      console.error('❌ Redis连接失败:', error.message);
+      throw error;
     }
+    // 重置重试计数
+    this._retryCount = 0;
   }
 
   nodeKey(wallet) {
@@ -216,6 +305,44 @@ class RefRedis {
       refer_id: obj.refer_id,
       lv: parseInt(obj.lv || "0"),
     };
+  }
+
+  /** 查找所有直接子集地址 */
+  async getChildrenWallets(parentWallet) {
+    await this.connect();
+    parentWallet = parentWallet.toLowerCase();
+    const allWallets = await this.getAllWallets();
+    const children = [];
+    
+    for (const wallet of allWallets) {
+      const nodeInfo = await this.getNodeInfo(wallet);
+      if (nodeInfo && nodeInfo.refer && nodeInfo.refer.toLowerCase() === parentWallet) {
+        children.push(wallet);
+      }
+    }
+    
+    return children;
+  }
+
+  /** 递归查找所有子集地址（包括子集的子集） */
+  async getAllDescendants(parentWallet) {
+    await this.connect();
+    const descendants = [];
+    const toProcess = [parentWallet.toLowerCase()];
+    
+    while (toProcess.length > 0) {
+      const current = toProcess.shift();
+      const children = await this.getChildrenWallets(current);
+      
+      for (const child of children) {
+        if (!descendants.includes(child)) {
+          descendants.push(child);
+          toProcess.push(child.toLowerCase());
+        }
+      }
+    }
+    
+    return descendants;
   }
 }
 

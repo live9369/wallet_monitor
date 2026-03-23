@@ -164,22 +164,23 @@ class MessageTemplates {
             walletName, 
             walletAddress,
             received, 
-            sent 
+            sent,
+            scanUrl
         } = data;
         
-        let message = `<a href="https://bscscan.com/address/${walletAddress}">${walletName}</a> · BNB\n`;
+        let message = `<a href="${scanUrl}address/${walletAddress}">${walletName}</a> · BNB\n`;
         
         // 处理接收
         if (received && received.length > 0) {
             received.forEach(item => {
                 if (item.type === 'bnb') {
                     const fromNickname = this.getAddressNickname(item.from);
-                    message += `Received: ${item.formattedValue} BNB From <a href="https://bscscan.com/address/${item.from}">${fromNickname}</a>\n`;
+                    message += `Received: ${item.formattedValue} BNB From <a href="${scanUrl}address/${item.from}">${fromNickname}</a>\n`;
                 } else if (item.type === 'token') {
                     const fromNickname = this.getAddressNickname(item.from);
                     // 格式化代币数值为4位小数
                     const formattedTokenValue = this.formatTokenValue(item.formattedValue);
-                    message += `Received: ${formattedTokenValue} <a href="https://bscscan.com/token/${item.tokenAddress}">${item.tokenSymbol}</a> From <a href="https://bscscan.com/address/${item.from}">${fromNickname}</a>\n`;
+                    message += `Received: ${formattedTokenValue} <a href="${scanUrl}token/${item.tokenAddress}">${item.tokenSymbol}</a> From <a href="${scanUrl}address/${item.from}">${fromNickname}</a>\n`;
                 }
             });
         }
@@ -193,7 +194,7 @@ class MessageTemplates {
                     const displayValue = item.formattedValue.startsWith('-') 
                         ? item.formattedValue.substring(1) 
                         : item.formattedValue;
-                    message += `Sent: ${displayValue} BNB To <a href="https://bscscan.com/address/${item.to}">${toNickname}</a>\n`;
+                    message += `Sent: ${displayValue} BNB To <a href="${scanUrl}address/${item.to}">${toNickname}</a>\n`;
                 } else if (item.type === 'token') {
                     const toNickname = this.getAddressNickname(item.to);
                     // 将负值转换为正值显示并格式化代币数值为4位小数
@@ -201,12 +202,12 @@ class MessageTemplates {
                         ? item.formattedValue.substring(1) 
                         : item.formattedValue;
                     const formattedTokenValue = this.formatTokenValue(displayValue);
-                    message += `Sent: ${formattedTokenValue} <a href="https://bscscan.com/token/${item.tokenAddress}">${item.tokenSymbol}</a> To <a href="https://bscscan.com/address/${item.to}">${toNickname}</a>\n`;
+                    message += `Sent: ${formattedTokenValue} <a href="${scanUrl}token/${item.tokenAddress}">${item.tokenSymbol}</a> To <a href="${scanUrl}address/${item.to}">${toNickname}</a>\n`;
                 }
             });
         }
         
-        message += `<a href="https://bscscan.com/tx/${hash}">TX hash</a>`;
+        message += `<a href="${scanUrl}tx/${hash}">TX hash</a>`;
         
         return message.trim();
     }
@@ -221,7 +222,8 @@ class MessageTemplates {
             hash, 
             walletName, 
             received, 
-            sent 
+            sent,
+            scanUrl
         } = data;
         
         let message = `<b>${walletName} · BNB</b>\n`;
@@ -229,18 +231,18 @@ class MessageTemplates {
         // 处理接收的BNB
         if (received && received.length > 0) {
             received.forEach(item => {
-                message += `Received: ${item.formattedValue} BNB From <a href="https://bscscan.com/address/${item.from}">${item.from.slice(0, 6)}...${item.from.slice(-4)}</a>\n`;
+                message += `Received: ${item.formattedValue} BNB From <a href="${scanUrl}address/${item.from}">${item.from.slice(0, 6)}...${item.from.slice(-4)}</a>\n`;
             });
         }
         
         // 处理发送的BNB
         if (sent && sent.length > 0) {
             sent.forEach(item => {
-                message += `Sent: ${item.formattedValue} BNB To <a href="https://bscscan.com/address/${item.to}">${item.to.slice(0, 6)}...${item.to.slice(-4)}</a>\n`;
+                message += `Sent: ${item.formattedValue} BNB To <a href="${scanUrl}address/${item.to}">${item.to.slice(0, 6)}...${item.to.slice(-4)}</a>\n`;
             });
         }
         
-        message += `<a href="https://bscscan.com/tx/${hash}">TX hash</a>`;
+        message += `<a href="${scanUrl}tx/${hash}">TX hash</a>`;
         
         return message.trim();
     }
