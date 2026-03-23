@@ -8,7 +8,7 @@ require('dotenv').config();
  * 区块扫描器 - 扫描指定区块区间的交易并解析
  */
 class BlockScanner {
-    constructor(providerUrl = 'https://dragon.maiko.icu/bsc2h', logger) {
+    constructor(providerUrl = process.env.RPC_URL || 'https://bsc-dataseed.binance.org/', logger) {
         this.provider = new ethers.JsonRpcProvider(providerUrl);
         this.logger = logger;
         this.processor = new TransactionProcessor(this.provider, this.logger);

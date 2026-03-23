@@ -406,7 +406,7 @@ module.exports = TransactionProcessor;
 // 
 if (require.main === module) {
     (async () => {
-        const provider = new ethers.JsonRpcProvider('https://dragon.maiko.icu/bsc2h');
+        const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://bsc-dataseed.binance.org/');
         const processor = new TransactionProcessor(provider);
         const txHash = '0x376e9add623dc0a1eaac5f7252cfcabab66fb746727d2debb92a4ceb310f3d20';
         const transaction = await processor.getTransaction(txHash);

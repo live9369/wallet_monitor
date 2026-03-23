@@ -7,7 +7,7 @@ require('dotenv').config();
  * 用于过滤指定区块区间和指定地址的交易
  */
 class BlockTransactionFilter {
-    constructor(providerUrl = 'https://dragon.maiko.icu/bsc2h') {
+    constructor(providerUrl = process.env.RPC_URL || 'https://bsc-dataseed.binance.org/') {
         // 初始化以太坊提供者
         this.provider = new ethers.JsonRpcProvider(providerUrl);
         

@@ -14,7 +14,7 @@ require('dotenv').config();
  * 从数据库获取监控地址，监控最新区块，推送交易通知
  */
 class WalletMonitor {
-    constructor(options = {}, url = 'https://dragon.maiko.icu/bsc2h') {
+    constructor(options = {}, url = process.env.RPC_URL || 'https://bsc-dataseed.binance.org/') {
         // 配置
         this.config = {
             chatId: options.chatId || process.env.CHAT_ID || '-4940120432',

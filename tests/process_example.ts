@@ -11,7 +11,7 @@ async function runProcessExample() {
     console.log('🚀 启动交易处理器示例...\n');
 
     // 创建扫描器实例
-    const scanner = new BlockScanner('https://dragon.maiko.icu/bsc2h');
+    const scanner = new BlockScanner(process.env.RPC_URL || 'https://bsc-dataseed.binance.org/');
 
     // 添加监控地址
     const exampleAddresses = [

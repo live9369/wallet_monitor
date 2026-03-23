@@ -394,7 +394,7 @@ class DatabaseExecutor {
             
             // 显示环境变量配置
             console.log(`🔧 新钱包识别: ${process.env.ENABLE_NEW_WALLET_DETECTION !== 'false' ? '✅ 已启用' : '❌ 已禁用'}`);
-            console.log(`📡 RPC URL: ${process.env.RPC_URL || 'https://dragon.maiko.icu/bsc2h'}`);
+            console.log(`📡 RPC URL: ${process.env.RPC_URL || 'https://bsc-dataseed.binance.org/'}`);
             console.log(`⏱️ 扫描间隔: ${process.env.SCAN_INTERVAL || '3000'}ms`);
             console.log(`📦 批次大小: ${process.env.BATCH_SIZE || '5'} 个区块`);
             console.log(`💰 最小金额: ${process.env.MIN_VALUE || '0.000'} BNB`);
