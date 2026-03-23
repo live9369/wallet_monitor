@@ -2,4 +2,5 @@ node_modules/
 .env
 
 logs/
+
 1.sh
