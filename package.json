@@ -1,10 +1,14 @@
 {
   "name": "wallet_monitor",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "dist/src/start.js",
   "scripts": {
-    "test": "node tests/block_tx_filter.test.js",
-    "start": "node src/start.js"
+    "build": "tsc -p tsconfig.json",
+    "test": "node dist/tests/block_tx_filter.test.js",
+    "start": "node dist/src/start.js",
+    "pm2:start": "npm run build && pm2 start ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js --update-env",
+    "pm2:logs": "pm2 logs wallet_monitor"
   },
   "keywords": [],
   "author": "",
@@ -15,5 +19,9 @@
     "node-telegram-bot-api": "^0.66.0",
     "redis": "^4.7.1",
     "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
   }
 }
